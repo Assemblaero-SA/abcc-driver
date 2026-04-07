@@ -262,7 +262,7 @@ static UINT16 abcc_GetAdiMapSizeInBits( const AD_AdiEntryType* psAdiEntry, UINT8
       iSize = 0;
       for( i = bElemStartIndex; i < ( bNumElem + bElemStartIndex ); i++ )
       {
-         iSize += ABCC_GetDataTypeSizeInBits( psAdiEntry->psStruct[ i ].bDataType );
+         iSize += ABCC_GetDataTypeSizeInBits( psAdiEntry->psStruct[ i ].bDataType ) * psAdiEntry->psStruct[ i ].iNumSubElem;
       }
    }
 #else
@@ -765,21 +765,62 @@ static ABCC_CmdSeqCmdStatusType ReadWriteMapCmd( ABP_MsgType* psMsg, void* pxUse
 #if ABCC_CFG_STRUCT_DATA_TYPE_ENABLED
          if( abcc_psAdiEntry[ iLocalMapIndex ].psStruct != NULL )
          {
-            UINT16 iDescOffset;
-            iDescOffset = 0;
-            ABCC_SetHighAddrOct( pMsgSendBuffer.psMsg16->aiData[ 2 ], bNumElemToMap );
+            UINT16 iDescOffset = 0;
+            UINT16 iStructIdx = bElemMapStartIndex;
 
-            while( iDescOffset < bNumElemToMap )
             {
-               ABCC_SetLowAddrOct( pMsgSendBuffer.psMsg16->aiData[ ( iDescOffset >> 1 ) + 3 ], abcc_psAdiEntry[ iLocalMapIndex ].psStruct[ iDescOffset + bElemMapStartIndex].bDataType );
-               iDescOffset++;
-               if( iDescOffset < bNumElemToMap )
+               UINT8 bFirstType = abcc_psAdiEntry[ iLocalMapIndex ].psStruct[ iStructIdx ].bDataType;
+               UINT16 iTotalSub = 0;
+               BOOL bAllSame = TRUE;
+               while( iStructIdx < ( bElemMapStartIndex + bNumElemToMap ) )
                {
-                  ABCC_SetHighAddrOct( pMsgSendBuffer.psMsg16->aiData[ ( iDescOffset >> 1 ) + 3 ], abcc_psAdiEntry[ iLocalMapIndex ].psStruct[ iDescOffset + bElemMapStartIndex].bDataType );
-                  iDescOffset++;
+                  UINT16 iNumSub = abcc_psAdiEntry[ iLocalMapIndex ].psStruct[ iStructIdx ].iNumSubElem;
+                  UINT8 bType = abcc_psAdiEntry[ iLocalMapIndex ].psStruct[ iStructIdx ].bDataType;
+                  iTotalSub += iNumSub;
+                  if( bType != bFirstType )
+                  {
+                     bAllSame = FALSE;
+                  }
+                  iStructIdx++;
+               }
+
+               if( bAllSame )
+               {
+                  ABCC_SetLowAddrOct( pMsgSendBuffer.psMsg16->aiData[ 1 ], (UINT8)iTotalSub );
+                  ABCC_SetLowAddrOct( pMsgSendBuffer.psMsg16->aiData[ 2 ], (UINT8)iTotalSub );
+                  ABCC_SetHighAddrOct( pMsgSendBuffer.psMsg16->aiData[ 2 ], 1 );
+                  ABCC_SetLowAddrOct( pMsgSendBuffer.psMsg16->aiData[ 3 ], bFirstType );
+                  pMsgSendBuffer.psMsg16->sHeader.iDataSize = iTOiLe( 7 );
+               }
+               else
+               {
+                  ABCC_SetLowAddrOct( pMsgSendBuffer.psMsg16->aiData[ 1 ], (UINT8)iTotalSub );
+                  iDescOffset = 0;
+                  iStructIdx = bElemMapStartIndex;
+                  while( iStructIdx < ( bElemMapStartIndex + bNumElemToMap ) )
+                  {
+                     UINT16 iSub;
+                     UINT8 bType = abcc_psAdiEntry[ iLocalMapIndex ].psStruct[ iStructIdx ].bDataType;
+                     UINT16 iNumSub = abcc_psAdiEntry[ iLocalMapIndex ].psStruct[ iStructIdx ].iNumSubElem;
+                     for( iSub = 0; iSub < iNumSub; iSub++ )
+                     {
+                        if( ( iDescOffset & 0x1 ) == 0 )
+                        {
+                           ABCC_SetLowAddrOct( pMsgSendBuffer.psMsg16->aiData[ ( iDescOffset >> 1 ) + 3 ], bType );
+                        }
+                        else
+                        {
+                           ABCC_SetHighAddrOct( pMsgSendBuffer.psMsg16->aiData[ ( iDescOffset >> 1 ) + 3 ], bType );
+                        }
+                        iDescOffset++;
+                     }
+                     iStructIdx++;
+                  }
+                  ABCC_SetLowAddrOct( pMsgSendBuffer.psMsg16->aiData[ 2 ], (UINT8)iTotalSub );
+                  ABCC_SetHighAddrOct( pMsgSendBuffer.psMsg16->aiData[ 2 ], (UINT8)iDescOffset );
+                  pMsgSendBuffer.psMsg16->sHeader.iDataSize = iTOiLe( 6 + iDescOffset );
                }
             }
-            pMsgSendBuffer.psMsg16->sHeader.iDataSize = iTOiLe( 6 + iDescOffset );
          }
 #endif
       }
